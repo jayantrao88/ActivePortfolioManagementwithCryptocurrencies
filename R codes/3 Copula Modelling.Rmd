@@ -1,0 +1,239 @@
+---
+title: "Copula Modelling"
+output: html_notebook
+---
+
+
+With UniformDist for all the assets in the sub-samples we proceed with modelling joint dependence with the help of Vine Copula
+
+```{r}
+library(VineCopula)
+```
+
+```{r}
+tic("Total time taken")
+
+parametric <- UniformDist[["Udist"]]
+empirical <-  UniformDist[["Uedf"]]
+NoofRebalPeriod <- length(parametric) #can be parametric or empirical.
+
+Copula.GARCH <- list()
+for (PortType in 1:2){
+  P.R.VineStructure <- rep(list(list()),NoofRebalPeriod)
+  P.C.VineStructure <- rep(list(list()),NoofRebalPeriod)
+  E.R.VineStructure <- rep(list(list()),NoofRebalPeriod)
+  E.C.VineStructure <- rep(list(list()),NoofRebalPeriod)
+
+  
+  for (PeriodNo in 1:NoofRebalPeriod){
+    tic(sprintf("Period %d of %d", PeriodNo, NoofRebalPeriod))
+    #Type 1 is C and 0 is R
+    colname <- colnames(parametric[[PeriodNo]])[(colnames(parametric[[PeriodNo]]) %in% AssetNames[[PortType]])]
+    P.R.VineStructure[[PeriodNo]] <- RVineStructureSelect(parametric[[PeriodNo]][,colname],type = 0,
+                                                         indeptest = TRUE, rotations = TRUE, se = TRUE) 
+    P.C.VineStructure[[PeriodNo]] <- RVineStructureSelect(parametric[[PeriodNo]][,colname],type = 1,
+                                                         indeptest = TRUE, rotations = TRUE, se = TRUE) 
+    E.R.VineStructure[[PeriodNo]] <- RVineStructureSelect(empirical[[PeriodNo]][,colname],type = 0,
+                                                          indeptest = TRUE, rotations = TRUE, se = TRUE)
+    E.C.VineStructure[[PeriodNo]] <- RVineStructureSelect(empirical[[PeriodNo]][,colname],type = 1,
+                                                          indeptest = TRUE, rotations = TRUE, se = TRUE)
+    toc()
+  }
+  Copula.GARCH[[PortType]] <- list(P.R.VineStructure = P.R.VineStructure,P.C.VineStructure = 
+                                     P.C.VineStructure,E.R.VineStructure= E.R.VineStructure,E.C.VineStructure = 
+                                     E.C.VineStructure)
+  toc()
+}
+names(Copula.GARCH) <- c("Base", "Alt")
+rm(PeriodNo,NoofRebalPeriod, parametric, empirical,P.R.VineStructure,P.C.VineStructure,E.R.VineStructure,E.C.VineStructure,PortType)
+
+```
+
+                ######## Simulating Vine Copulas #########
+    Simulating simulations = 10,000 std residuals from the Vinecopula determined.
+    10,000 sim takes 2.5 mins
+    
+```{r}
+tic("Total")
+
+Sim.Udist <- list()
+
+for(PortType in 1:2){
+
+ copula.garch <- Copula.GARCH[[PortType]]
+      
+  P.R.VineStructure <- copula.garch[["P.R.VineStructure"]]
+  P.C.VineStructure <- copula.garch[["P.C.VineStructure"]]
+  E.R.VineStructure <- copula.garch[["E.R.VineStructure"]]
+  E.C.VineStructure <- copula.garch[["E.C.VineStructure"]]
+  
+  NoofRebalPeriod <- length(P.R.VineStructure) #can be parametric or empirical.
+  Simulations <- 10000
+  
+  P.R.Sim <- rep(list(list()),NoofRebalPeriod)
+  P.C.Sim <- rep(list(list()),NoofRebalPeriod)
+  E.R.Sim <- rep(list(list()),NoofRebalPeriod)
+  E.C.Sim <- rep(list(list()),NoofRebalPeriod)
+  
+  for (PeriodNo in 1:NoofRebalPeriod){
+    P.R.Sim[[PeriodNo]] <- as.xts(RVineSim(Simulations,P.R.VineStructure[[PeriodNo]]), order.by = 
+                                    seq(as.Date("2000-01-01"), length = 10000,by = "days"))
+    P.C.Sim[[PeriodNo]] <- as.xts(RVineSim(Simulations,P.C.VineStructure[[PeriodNo]]), order.by = 
+                                    seq(as.Date("2000-01-01"), length = 10000,by = "days"))
+    E.R.Sim[[PeriodNo]] <- as.xts(RVineSim(Simulations,E.R.VineStructure[[PeriodNo]]), order.by = 
+                                    seq(as.Date("2000-01-01"), length = 10000,by = "days"))
+    E.C.Sim[[PeriodNo]] <- as.xts(RVineSim(Simulations,E.C.VineStructure[[PeriodNo]]), order.by = 
+                                    seq(as.Date("2000-01-01"), length = 10000,by = "days"))
+   }
+  Sim.Udist[[PortType]] <- list(P.R.Sim = P.R.Sim, P.C.Sim = P.C.Sim, E.R.Sim = E.R.Sim, E.C.Sim = E.C.Sim)
+}
+
+names(Sim.Udist) <- c("Base", "Alt")
+  
+rm(PeriodNo, NoofRebalPeriod,P.R.VineStructure,P.C.VineStructure,E.R.VineStructure,E.C.VineStructure,Simulations, P.R.Sim,P.C.Sim,E.R.Sim,E.C.Sim,copula.garch)
+toc()
+```
+
+Converting the Simulated Udist from Estimated Copula, using ARMA-GARCH parameters , to Simulated Returns
+
+
+
+```{r}
+
+Sim.StdResids <-  Sim.Results <- Sim.Returns  <- list()
+
+for(PortType in 1:2){
+  
+
+UdistTEMP.P.R <- Sim.Udist[[PortType]][["P.R.Sim"]]
+UdistTEMP.P.C <- Sim.Udist[[PortType]][["P.C.Sim"]]
+UedfTEMP.E.R <- Sim.Udist[[PortType]][["E.R.Sim"]]
+UedfTEMP.E.C <- Sim.Udist[[PortType]][["E.C.Sim"]]
+
+StandardizedResiduals <- Std.Resids
+
+ParamTEMP <- Parameters
+
+NoofRebalPeriod =length(UdistTEMP.P.R) # Same for all the four Simulated Std.Resids
+observations = 10000    # Number of simulations
+
+Sim.Stdresid.P.R  <- Sim.Stdresid.P.C <- Sim.Stdresid.E.R  <- Sim.Stdresid.E.C <-  Sim.Returns.P.R <- Sim.Returns.P.C <- Sim.Returns.E.R <- Sim.Returns.E.C <-  SimResults.P.R <-  SimResults.P.C <- SimResults.E.R <- SimResults.E.C <- rep(list(list()),NoofRebalPeriod)
+
+for (PeriodNo in 1:NoofRebalPeriod){
+  tic(sprintf("Period %d of %d", PeriodNo, NoofRebalPeriod))
+  cnames <- colnames(UdistTEMP.P.R[[PeriodNo]])
+  DistTemp <- ParamTEMP[[PeriodNo]][["Parameters"]][(nrow(ParamTEMP[[PeriodNo]][["Parameters"]])-1)
+                                                    :nrow(ParamTEMP[[PeriodNo]][["Parameters"]]),cnames]
+  NoofAssets <- ncol(DistTemp) 
+  
+  gjr <- ModelFit[["Modelfit"]][[PeriodNo]][cnames]
+  StdResiduals <- StandardizedResiduals[[PeriodNo]][,cnames]
+  
+  Sim.Stdresid.P.R[[PeriodNo]]  <- Sim.Stdresid.P.C[[PeriodNo]] <- Sim.Stdresid.E.R[[PeriodNo]]  <-
+  Sim.Stdresid.E.C[[PeriodNo]] <-  Sim.Returns.P.R[[PeriodNo]] <- Sim.Returns.P.C[[PeriodNo]] <- 
+  Sim.Returns.E.R[[PeriodNo]] <- Sim.Returns.E.C[[PeriodNo]] <-  matrix(nrow = observations, ncol = NoofAssets, 
+                                                                        dimnames = list(NULL,cnames))
+  SimResults.P.R[[PeriodNo]] <-  SimResults.P.C[[PeriodNo]] <- SimResults.E.R[[PeriodNo]] <- 
+                                SimResults.E.C[[PeriodNo]] <-  rep(list(list()),NoofAssets)
+  
+  names(SimResults.P.R[[PeriodNo]]) <- names(SimResults.P.C[[PeriodNo]]) <- names(SimResults.E.R[[PeriodNo]]) <- 
+    names(SimResults.E.C[[PeriodNo]]) < names(gjr)
+   
+    for (AssetNo in 1:NoofAssets){ 
+      Sim.Stdresid.P.R[[PeriodNo]][,AssetNo] <- qdist(distribution = "sstd",UdistTEMP.P.R[[PeriodNo]][,AssetNo], 
+                                                      mu= 0, sigma = 1, skew = DistTemp["skew",AssetNo], shape = 
+                                                        DistTemp["shape",AssetNo])
+      Sim.Stdresid.P.C[[PeriodNo]][,AssetNo] <- qdist(distribution = "sstd",UdistTEMP.P.C[[PeriodNo]][,AssetNo],
+                                                      mu= 0, sigma = 1, skew = DistTemp["skew",AssetNo], shape = 
+                                                        DistTemp["shape",AssetNo])
+      Sim.Stdresid.E.R[[PeriodNo]][,AssetNo] <- quantile(StdResiduals[,AssetNo],UedfTEMP.E.R[[PeriodNo]][,AssetNo])
+      Sim.Stdresid.E.C[[PeriodNo]][,AssetNo] <- quantile(StdResiduals[,AssetNo],UedfTEMP.E.C[[PeriodNo]][,AssetNo])
+      
+     
+      SimResults.P.R[[PeriodNo]][[AssetNo]] <- ugarchsim(fit = gjr[[AssetNo]], n.sim = 1, m.sim = observations,
+                                                         startMethod = "sample", rseed = 123,custom.dist = 
+                                                           list(name = "Parametric", distfit =
+                                                                  t(Sim.Stdresid.P.R[[PeriodNo]][,AssetNo])))
+      SimResults.P.C[[PeriodNo]][[AssetNo]] <- ugarchsim(fit = gjr[[AssetNo]], n.sim = 1, m.sim = observations, 
+                                                         startMethod = "sample", rseed = 123,custom.dist = 
+                                                           list(name ="Parametric", distfit =
+                                                                  t(Sim.Stdresid.P.C[[PeriodNo]][,AssetNo])))
+      SimResults.E.R[[PeriodNo]][[AssetNo]] <- ugarchsim(fit = gjr[[AssetNo]], n.sim = 1, m.sim = observations, 
+                                                         startMethod = "sample", rseed = 123,custom.dist = 
+                                                           list(name = "Empirical", distfit
+                                                                =t(Sim.Stdresid.E.R[[PeriodNo]][,AssetNo])))
+      SimResults.E.C[[PeriodNo]][[AssetNo]] <- ugarchsim(fit = gjr[[AssetNo]], n.sim = 1, m.sim = observations, 
+                                                         startMethod = "sample", rseed = 123,custom.dist = 
+                                                           list(name = "Empirical", distfit
+                                                                =t(Sim.Stdresid.E.C[[PeriodNo]][,AssetNo])))
+      
+      Sim.Returns.P.R[[PeriodNo]][,AssetNo] <- t(fitted(SimResults.P.R[[PeriodNo]][[AssetNo]]))
+      Sim.Returns.P.C[[PeriodNo]][,AssetNo] <- t(fitted(SimResults.P.C[[PeriodNo]][[AssetNo]]))
+      Sim.Returns.E.R[[PeriodNo]][,AssetNo] <- t(fitted(SimResults.E.R[[PeriodNo]][[AssetNo]]))
+      Sim.Returns.E.C[[PeriodNo]][,AssetNo] <- t(fitted(SimResults.E.C[[PeriodNo]][[AssetNo]]))
+    }
+    Sim.Returns.P.R[[PeriodNo]] <- as.xts(Sim.Returns.P.R[[PeriodNo]],  order.by = seq(as.Date('1950-01-01'), 
+                                                                                       by = 'day', length = 10000 ))
+    Sim.Returns.P.C[[PeriodNo]] <- as.xts(Sim.Returns.P.C[[PeriodNo]],  order.by = seq(as.Date('1950-01-01'), 
+                                                                                       by = 'day', length = 10000 ))
+    Sim.Returns.E.R[[PeriodNo]] <- as.xts(Sim.Returns.E.R[[PeriodNo]],  order.by = seq(as.Date('1950-01-01'), 
+                                                                                       by = 'day', length = 10000 ))
+    Sim.Returns.E.C[[PeriodNo]] <- as.xts(Sim.Returns.E.C[[PeriodNo]],  order.by = seq(as.Date('1950-01-01'), 
+                                                                                       by = 'day', length = 10000 ))
+  toc()
+  }
+rm(ParamTEMP,observations,PeriodNo,AssetNo,NoofRebalPeriod,NoofAssets,DistTemp,StandardizedResiduals,UdistTEMP.P.R,UdistTEMP.P.C,UedfTEMP.E.R,UedfTEMP.E.C,StdResiduals,cnames, gjr)
+
+Sim.StdResids[[PortType]] <- list(Sim.Stdresid.P.R = Sim.Stdresid.P.R, Sim.Stdresid.P.C = Sim.Stdresid.P.C, Sim.Stdresid.E.R =  Sim.Stdresid.E.R, Sim.Stdresid.E.C = Sim.Stdresid.E.C)
+Sim.Results[[PortType]] <- list(SimResults.P.R = SimResults.P.R, SimResults.P.C = SimResults.P.C, SimResults.E.R = SimResults.E.R, SimResults.E.C = SimResults.E.C)
+Sim.Returns[[PortType]] <- list(Sim.Returns.P.R = Sim.Returns.P.R, Sim.Returns.P.C = Sim.Returns.P.C, Sim.Returns.E.R = Sim.Returns.E.R, Sim.Returns.E.C = Sim.Returns.E.C)
+}
+
+names(Sim.StdResids) <-names(Sim.Results)<- names(Sim.Returns) <- c("Base", "Alt")
+
+rm(Sim.Returns.E.C,Sim.Returns.E.R,Sim.Returns.P.C,Sim.Returns.P.R,SimResults.E.C,SimResults.E.R,SimResults.P.C,SimResults.P.R, Sim.Stdresid.E.C,Sim.Stdresid.E.R,Sim.Stdresid.P.C,Sim.Stdresid.P.R)
+
+
+
+```
+
+
+SANITY CHECK --- Descriptive Statistics of the Simulated Returns
+
+```{r}
+Mean_Sim.Results <- lapply(Sim.Returns[["Sim.Returns.P.R"]], colMeans)
+
+NoofRebalPeriod <-length(Mean_Sim.Results)
+Mean.Sim.Results <-  data.frame(matrix(nrow = NoofRebalPeriod, ncol = length(Mean_Sim.Results[[NoofRebalPeriod]])))
+colnames(Mean.Sim.Results) <- names(Mean_Sim.Results[[NoofRebalPeriod]])  
+
+for (PeriodNo in 1:NoofRebalPeriod){
+  unlis <-  unlist(Mean_Sim.Results[[PeriodNo]])
+  Mean.Sim.Results[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)  
+}
+
+
+rm(NoofRebalPeriod, PeriodNo, Mean_Sim.Results)
+```
+
+```{r}
+Median_Sim.Results <- lapply(Sim.Returns[["Sim.Returns.E.C"]], colMedians)
+
+NoofRebalPeriod <-length(Median_Sim.Results)
+Median.Sim.Results <-  data.frame(matrix(nrow = NoofRebalPeriod, ncol = length(Median_Sim.Results[[NoofRebalPeriod]])))
+colnames(Median.Sim.Results) <- names(Median_Sim.Results[[NoofRebalPeriod]])  
+
+for (PeriodNo in 1:NoofRebalPeriod){
+  unlis <-  unlist(Median_Sim.Results[[PeriodNo]])
+  Median.Sim.Results[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)  
+}
+
+```
+
+PROCESS 4 : Now that you have simulated returns from the joint copula model proceed to Portfolio Optimization.
+
+    
+    
+    

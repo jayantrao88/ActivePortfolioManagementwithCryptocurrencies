@@ -1,0 +1,307 @@
+---
+title: "Preliminary Sorting of Data"
+output: html_notebook
+---
+
+Download all the libraries required
+```{r}
+library(quantmod)  #for downloading data/daily prices from various websites.
+library(crypto) #fdownloading cryptocurrency prices from coinmarketcap.com
+library(reshape2) 
+library(xts)
+library(magrittr) 
+library(readxl) #make sure the package officer is detached before you run this chunk of code
+library(xts)
+library(PerformanceAnalytics)
+library(rlist)
+library(tidyverse)
+library(ggthemes)
+
+```
+Aset universe:
+
+1) Market Index              -- SP500 
+2) Other Market Indicies     -- DJIA, NASDAQ
+3) Sector Indices            -- Consumer Discretionary,	 Consumer Staple,	 Health Care,	 
+                                Industrials ,	 Information Technology,	 Materials ,
+                                Real Estate, Utilities, Communication Services,
+                                Financials, Energy
+4) Fixed Income Securities   -- 
+5) Commodities               -- Gold, Silver, Crude Oil 
+6) International Indices     -- NIKKEI, CAC 40, FTSE, Hang Seng Index, S&P BSE Sensex,
+                                KOSPI, MOEX Index
+7) Cryptocurrencies          -- BTC,LTC, XRP,XMR, XLM,ETH, EOS, BCH
+8) Volatility Index          -- VIX
+9) Risk Free Rate            -- 1-Month Treasury Constant Maturity Rate
+
+
+1,2,3,4,5,6,8 --- Bloomberg
+7         --- coinmarketcap.com
+9         --- FRED
+
+Extracting Cryptocurrency prices
+```{r}
+
+
+CryptoPrices <- crypto_history(coin = c("BCH","ETH", "XRP","BTC",
+                                        "LTC","XMR","XLM","EOS"),
+                                        start_date = '20190803')
+CryptoPrices <- CryptoPrices[,c("symbol","date","close")]
+CryptoPrices <- dcast(CryptoPrices,date ~ symbol, value.var = "close")
+names(CryptoPrices)[1] <- "Dates"
+CryptoPrices <- as.xts(CryptoPrices[,-1],order.by = CryptoPrices[,1])
+CryptoPrices <- CryptoPrices[,c("BTC","LTC","XRP","XMR","ETH","EOS","BCH")]
+#CryptoReturns <- diff(log(CryptoPrices)) 
+```
+
+Extracting from 1 month US Treasury rate from FRED using QuantMod library
+```{r}
+
+getSymbols('DGS1MO', src = 'FRED', from = as.Date("2013-04-23"), periodicity = "daily")
+
+DGS1MO <- DGS1MO["2013-04-23/2020-04-30",]
+```
+
+Importing Prices for all the assets and storing it as an xts object.
+```{r}
+NoofAssets <- 57 # number of asset -- variables, columns in the file
+#prices <- as.data.frame(read_xlsx("C:\\Users\\jrad2017\\OneDrive - Claremont Graduate University\\jmp\\new analysis\\Active Portfolio Management with Cryptocurrency\\portfolio assets.xlsx", sheet = "Rfile", col_types = c( "date", rep("numeric",NoofAssets)),na = c("NA", "#N/A" )))
+
+prices <- as.data.frame(read_xlsx("/Users/jayantrao/OneDrive - Claremont Graduate University/jmp/new analysis/Active Portfolio Management with Cryptocurrency/portfolio assets.xlsx", sheet = "Rfile", col_types = c( "date", rep("numeric",NoofAssets)),na = c("NA", "#N/A" )))
+
+prices <- as.xts(prices[,-1], order.by = prices[,1])
+rm(NoofAssets)
+```
+
+Index of Assets and their Variable Names:
+```{r}
+
+#Index <- as.data.frame(read_xlsx("C:\\Users\\jrad2017\\OneDrive - Claremont Graduate University\\jmp\\new analysis\\Active Portfolio Management with Cryptocurrency\\portfolio assets.xlsx", sheet = "Rindex"))
+
+Index <- as.data.frame(read_xlsx("/Users/jayantrao/OneDrive - Claremont Graduate University/jmp/new analysis/Active Portfolio Management with Cryptocurrency/portfolio assets.xlsx", sheet = "Rindex"))
+
+
+#ClusteredIndex <- as.data.frame(read_xlsx("C:\\Users\\jrad2017\\OneDrive - Claremont Graduate University\\jmp\\new analysis\\Active Portfolio Management with Cryptocurrency\\portfolio assets.xlsx", sheet = "Clustered"))
+
+
+ClusteredIndex <- as.list(read_xlsx("/Users/jayantrao/OneDrive - Claremont Graduate University/jmp/new analysis/Active Portfolio Management with Cryptocurrency/portfolio assets.xlsx", sheet = "Clustered"))
+
+
+ClusteredIndex <- lapply(ClusteredIndex, function(x) x[!is.na(x)])
+```
+
+Creating Portfolios based on your asset or cluster choice(except cryptocurrencies) and selecting common dates 
+If Cluster Use this
+```{r}
+Assets <- c("Market","Commodities","Fixed") #type in the Cluster symbol
+ClusterAssets <- vector()
+for(i in 1:length(Assets)){ClusterAssets <- append(ClusterAssets,ClusteredIndex[[Assets[i]]])}
+ClusterAssets <- ClusterAssets %>% na.omit()
+BasePort <- xts()
+BasePort <- as.xts(x = prices[,c(ClusterAssets)], order.by = prices[,1])
+rm(Assets,ClusterAssets, i)
+
+
+
+```
+If Individual Assets use this
+```{r}
+Assets <- c("SP500","DJIA","NASDAQ") #type in the asset symbol -- Refer Index
+BasePort <-  BasePort %>% as.xts(x = prices[,c(Assets)], order.by = prices[,1])
+rm(Assets)
+```
+Select only those dates which have values for all the selected assets and calculate their Ln returns.
+
+```{r}
+
+BasePort <- BasePort %>% na.omit() %>% Return.calculate(method = "log") %>% merge.xts(as.xts(x=prices[,"US1M"], order.by = prices[,1])/100, join= "inner") %>% na.omit()
+
+colnames(BasePort)[ncol(BasePort)] <- "US1M"
+```
+
+Choice of Cryptocurrencies you want to add in your alternative portfolio
+If you want all follow this:
+```{r}
+CryptoAssets <- prices[,ClusteredIndex[["Crypto"]]]
+```
+If you want to choose follow this: Make sure your list is given highest to lowest  datapoitns.
+```{r}
+Crypto <- c("BTC","LTC","XRP","ETH")
+CryptoAssets <- as.xts(x = prices[,Crypto], order.by = prices[,1])
+rm(Crypto)
+```
+Select only those dates which have values for all the selected assets and calculate their Ln returns.
+```{r}
+
+CryptoAssets <- Return.calculate(CryptoAssets, method = "log")
+```
+
+Creating a Full Portfolio :  Base + Crypto 
+   AND
+Subtracting RiskFreeRate from the assets to get excess returns -- US1M, after deannualizing it to daily interest rate (treated as risk free return)
+
+```{r}
+#creating a new function
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+FullPortBackTesting <- FullPort <- merge.xts(BasePort,CryptoAssets,join = "inner")
+
+FullPortBackTesting <- subset(FullPortBackTesting, select = -c(get("US1M")))
+
+days <- 252 # 252 check 
+B <- coredata(FullPort)
+date <- index(FullPort)
+B <- B - (((1+B[,"US1M"])^(1/days))-1)
+B <- subset(B,select = -c(get("US1M")))
+FullPort <- as.xts(B,order.by = date)
+rm(date, B, days)
+
+AssetNames <- list(BaseNames = names(FullPort)[names(FullPort)%!in% 
+                                                 names(CryptoAssets)], AltNames = names(FullPort))
+rm(BasePort,CryptoAssets)
+```
+
+Creating Sub-Portfolios for Base and Alternative: Base + Crypto 
+Procedure : Fixed Window : 500 obs , Rebalance = Every 30 days
+1) Every subportfolio has 500 observations for each Asset 
+2) Rebalancing happens every 30 days. (This is arbitrary)
+
+```{r}
+
+Fixedwindow <- 500 #days
+Rebalance <- 30 #days
+
+SubFull <- list()   
+Port <- FullPort 
+
+
+for(i in seq(from = Fixedwindow, to = nrow(Port), by = Rebalance)){
+  
+  startindex <- i - Fixedwindow + 1
+  endindex   <- i
+  
+  assets <- Port[startindex:endindex,]
+  
+  for (j in 1:ncol(assets)){
+    
+    if(sum(is.na(assets[,j])) < 1) {#check column wise if is.na(column) > nuber of observations or % of the windowsize, drop the variable
+      if(j == 1){AssetsFinallyConsidered <- assets[,j]}
+      else{AssetsFinallyConsidered = merge.xts(AssetsFinallyConsidered,assets[,j])}
+    }
+  }
+  print("Total NAs in the Sub-portfolio:",sum(is.na(AssetsFinallyConsidered[,])))
+  SubFull <- list.append(SubFull, AssetsFinallyConsidered) 
+}
+
+
+Dates <- data.frame(matrix(nrow = Fixedwindow, ncol = length(SubFull)))
+for(PeriodNo in 1:list.count(SubFull)){Dates[,PeriodNo] <- index(SubFull[[PeriodNo]])}
+
+rm(i,j, startindex, endindex, assets, Fixedwindow, Rebalance, Port, AssetsFinallyConsidered, PeriodNo)
+```
+Creating Sub Portfolios for Backtesting (refer 5, 5b Backtesting)
+```{r}
+
+Fixedwindow <- 500 #days
+Rebalance <- 30 #days
+
+SubFullBackTesting <-  list()   
+Port <- FullPortBackTesting
+
+
+for(i in seq(from = Fixedwindow, to = nrow(Port), by = Rebalance)){
+  
+  startindex <- i - Fixedwindow + 1
+  endindex   <- i
+  
+  assets <- Port[startindex:endindex,]
+  
+  for (j in 1:ncol(assets)){
+    
+    if(sum(is.na(assets[,j])) < 1) {#check column wise if is.na(column) > nuber of observations or % of the windowsize, drop the variable
+      if(j == 1){AssetsFinallyConsidered <- assets[,j]}
+      else{AssetsFinallyConsidered = merge.xts(AssetsFinallyConsidered,assets[,j])}
+    }
+  }
+  print("Total NAs in the Sub-portfolio:",sum(is.na(AssetsFinallyConsidered[,])))
+  SubFullBackTesting <- list.append(SubFullBackTesting, AssetsFinallyConsidered) 
+  
+}
+
+
+DatesBack <- data.frame(matrix(nrow = Fixedwindow, ncol = length(SubFull)))
+for(PeriodNo in 1:list.count(SubFull)){
+
+DatesBack[,PeriodNo] <- index(SubFull[[PeriodNo]])
+}
+
+rm(i,j, startindex, endindex, assets, Fixedwindow, Rebalance, Port, AssetsFinallyConsidered)
+```
+
+Creating a function that converts an unequal list of lists to a dataframe -- very useful going forward.
+```{r}
+Unequal_df <- function(LIST){
+  
+  NoofRebalPeriod <- length(LIST)
+
+  out <-   data.frame(matrix(nrow = NoofRebalPeriod, ncol = length(LIST[[NoofRebalPeriod]])))
+  colnames(out)  <- names(LIST[[NoofRebalPeriod]])  
+
+  for (PeriodNo in 1:NoofRebalPeriod){
+    unlis <-  unlist(LIST[[PeriodNo]])
+    out[PeriodNo,names(unlis)] <- t(unlis) 
+    rm(unlis)  
+    }
+output <- out  
+}
+
+```
+SANITY CHECK : Calculate the subportfolio means for each asset in the subportfolio
+```{r}
+
+SubFull_Mean <- lapply(SubFull,colMeans)
+SubFull_Mean <- Unequal_df(SubFull_Mean)
+```
+You may remove the Mean Dataframe once you are done checking the numbers
+```{r}
+rm(SubFull_Mean)
+```
+
+
+PROCESS 2: Univariate Modelling for each of the assets in the subportfolio using univariate Modelling.Rmd
+
+
+EXTRASSSSSSSS:
+
+Creating Scatter Plots for every pair of asset.
+
+```{r}
+data <- prices  %>%  select(c("Dates","ETH","SILVER")) %>% na.omit()
+data <-   as.xts(data[,-1], order.by = data[,1]) %>% Return.calculate(method = "log") %>% as.data.frame() %>% rownames_to_column(var= "Dates") 
+
+data <-  data %>% mutate(Year = format(as.Date(Dates),'%Y'),Month = format(as.Date(Dates),'%m') , Day = format(as.Date(Dates),'%d'))
+
+
+ggplot(data,aes_string(x = colnames(data)[2], y =colnames(data)[3])) + 
+                                             geom_point(color = "Magenta", shape = 1)+ facet_wrap(~Year) + theme_economist_white()+
+                                             theme(plot.title = element_text(margin = margin(t = 50, b = -5), hjust = 0.5),
+                                                   axis.title.y = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)),
+                                                   axis.title.x = element_text(margin = margin(t = 0, r = 20, b = 0, l = 0)))
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,171 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+
+
+```{r, echo=FALSE, include=FALSE}
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+library(pbmcapply)
+library(tictoc)
+library(parallel)
+library(foreach)
+library(iterators)
+library(Rglpk)
+library(Rsymphony)
+library(quadprog)
+library(ROI)
+library(ROI.plugin.glpk)
+library(ROI.plugin.quadprog)
+library(ROI.plugin.symphony)
+#library(rlist)
+
+```
+
+```{r}
+Unequal_df <- function(LIST){
+  
+NoofRebalPeriod <- length(LIST)
+
+out <-   data.frame(matrix(nrow = NoofRebalPeriod, ncol = length(LIST[[NoofRebalPeriod]])))
+colnames(out)  <- names(LIST[[NoofRebalPeriod]])  
+
+for (PeriodNo in 1:NoofRebalPeriod){
+unlis <-  unlist(LIST[[PeriodNo]])
+  out[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)  
+}
+output <- out  
+}
+```
+
+
+Initializing the variables -- PortfolioWeights and PortfolioOptimization.
+```{r, echo=FALSE}
+
+PortfolioWeights <- list(NaivePortfolio = list(), MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), 
+                         MaxMean = list())
+
+PortfolioOptimization <- list( MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), 
+                              MaxMean = list())
+```
+
+
+2) Minimum Standard Deviation Portfolio
+
+```{r,echo=FALSE}
+
+     
+if (length(PortfolioWeights[["MinSD"]]) != 0 )
+  {PortfolioWeights[["MinSD"]] <- list()}
+if (length(PortfolioOptimization[["MinSD"]]) != 0 )
+  {PortfolioOptimization[["MinSD"]] <- list()}
+  
+simreturns <- Sim.Returns
+Pweights <- list()
+Popt <- list()
+
+for (CopulaType in 1:4){
+  tic(sprintf("CopulaType %d", CopulaType))    
+  AssetsforOptimization = simreturns[[CopulaType]]
+  NoofRebalPeriod = length(AssetsforOptimization)
+  weights <-  opt <- list()
+  
+  MinSDOpt <- function(AssetOptim){
+                    init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                    #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                     init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                     min_sum = 0.99, max_sum = 1.01) 
+                     init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                   
+                    init.portfolio <- add.objective(portfolio=init.portfolio, type="risk", name="var")
+                    optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                                       optimize_method = "ROI",trace = TRUE,message = T)
+                    out <- optimized
+                    return(out)
+  }
+  
+  numCores <- detectCores()
+ #For Mac
+  opt <- pbmcapply::pbmclapply(AssetsforOptimization,MinSDOpt, mc.cores = numCores)
+  # For Windows
+  #opt <- parallelsugar::mclapply(AssetsforOptimization,MinSDOpt, mc.cores = numCores)
+  weights <- lapply(opt, function(x){x$weights})
+  
+  weights <- Unequal_df(weights)
+  Pweights[[CopulaType]] <- weights
+  
+  Popt[[CopulaType]] <- opt
+  toc()
+}
+names(Pweights) <- c("P.R.MinSD.Weights","P.C.MinSD.Weights","E.R.MinSD.Weights","E.C.MinSD.Weights")
+
+names(Popt) <- c("P.R.MinSD.Optimization","P.C.MinSD.Optimization","E.R.MinSD.Optimization","E.C.MinSD.Optimization")
+PortfolioWeights[["MinSD"]] <- Pweights
+PortfolioOptimization[["MinSD"]] <- Popt
+rm(opt,weights, CopulaType, NoofRebalPeriod, AssetsforOptimization,simreturns,Pweights,Popt,MinSDOpt,numCores)
+toc()
+
+```
+
+
+
+5) STARR Portfolio
+
+```{r}
+
+if (length(PortfolioWeights[["Starr"]]) != 0 ){PortfolioWeights[["Starr"]] <- list()}
+if (length(PortfolioOptimization[["Starr"]]) != 0 ){PortfolioOptimization[["Starr"]] <- list()}
+
+simreturns <- Sim.Returns
+Pweights <- list()
+Popt <- list()  
+
+for (CopulaType in 1:4){
+  tic(sprintf("CopulaType %d", CopulaType))  
+  AssetsforOptimization = simreturns[[CopulaType]]
+  NoofRebalPeriod = length(AssetsforOptimization)
+  weights <-  opt <- list()
+  
+  Staropt <- function(AssetOptim){
+                      init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                      #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                      init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                     min_sum = 0.99, max_sum = 1.01) 
+                      init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                      
+                      
+                      init.portfolio <- add.objective(portfolio=init.portfolio, type="risk", name="ES")
+                      init.portfolio <- add.objective(portfolio=init.portfolio, type="return", name="mean")
+                      optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                               optimize_method = "ROI",trace = TRUE, maxSTARR = TRUE,message = T)
+                      out <- optimized
+                      return(out)
+                      }
+  numCores <- detectCores() 
+  opt <- pbmcapply::pbmclapply(AssetsforOptimization,Staropt, mc.cores = numCores)
+  weights <- lapply(opt, function(x){x$weights})
+
+
+  weights <- Unequal_df(weights)
+  Pweights[[CopulaType]] <- weights
+  
+  Popt[[CopulaType]] <- opt
+  toc()
+}
+names(Pweights) <- c("P.R.Starr.Weights","P.C.Starr.Weights","E.R.Starr.Weights","E.C.Starr.Weights")
+names(Popt) <- c("P.R.Starr.Optimization","P.C.Starr.Optimization","E.R.Starr.Optimization","E.C.Starr.Optimization")
+
+PortfolioWeights[["Starr"]] <- Pweights
+PortfolioOptimization[["Starr"]] <- Popt
+
+
+rm(opt, weights, CopulaType, NoofRebalPeriod, AssetsforOptimization, simreturns,Pweights,Popt,Staropt,numCores)
+toc()
+
+
+```

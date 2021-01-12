@@ -1,0 +1,468 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(ggpubr)
+```
+
+
+Creating a mega xts object consisting of Evolution  and weight columns for all the five different portfolios separately.
+
+A Name would be a combination of the below:
+
+Portfolio = Commo,Fixed,MarFixCom,Market,Sector
+Dependence = Conventional, Copula 
+Copula Type = NaN, P.R, P.C, E.R, E.C
+Base/Alt  = Base, Alt
+Optimization = Naive, MinSD, MinES, Sharpe, MaxMean
+
+Portfolio * Dependence * Copula Type * Base/Alt * Optimization 
+
+5*2*5*2*5 = 500 columns and 41 rows (for 41 time periods)
+
+```{r}
+
+
+a <- Sectors[["Backtesting"]][["ConvPortfolioEvolution"]] 
+
+
+for ( i  in 1:2){
+  colnames(a[[i]]) <- paste("Sector","Copula",names(a)[i],colnames(a[[i]]) ,sep = ".")
+}
+
+Sectors[["Backtesting"]][["ConvPortfolioEvolution"]]  <- NULL
+
+Sectors[["Backtesting"]]  <- list.append(Sectors[["Backtesting"]], PortfolioEvolution = a)
+
+rm(a,i)
+```
+
+
+```{r}
+
+a <- Sectors[["Backtesting"]][["PortfolioEvolution"]] 
+
+
+for ( i  in 1:2){
+  colnames(a[[i]]) <- gsub(colnames(a[[i]]), pattern = "Returns", replacement = "Evolution")
+  colnames(a[[i]]) <- paste("Sector","Copula",names(a)[i],colnames(a[[i]]) ,sep = ".")
+}
+
+Sectors[["Backtesting"]][["PortfolioEvolution"]]  <- NULL
+
+Sectors[["Backtesting"]]  <- list.append(Sectors[["Backtesting"]], PortfolioEvolution = a)
+
+rm(a,i)
+
+
+```
+
+Weights
+
+Portfolio * Dependence * Copula Type * Base/Alt * Optimization  * AssetName
+```{r}
+
+a <- Sectors[["Backtesting"]][["ConvPortfolioWeights"]]
+
+for (BorA in 1:2){
+  for(PortOpt in 1:6){
+     
+    colnames(a[[BorA]][[PortOpt]]) <- paste("Sector","Conv","NaN",names(a)[BorA], names(a[[BorA]])[PortOpt],colnames(a[[BorA]][[PortOpt]]),"Weights", sep = ".")
+    
+    
+  }
+}
+
+Sectors[["Backtesting"]][["ConvPortfolioWeights"]] <- NULL
+
+Sectors[["Backtesting"]] <- list.append(Sectors[["Backtesting"]],ConvPortfolioWeights = a )
+
+rm(a,BorA, PortOpt)
+
+```
+
+
+```{r}
+a <- Sectors[["Backtesting"]][["PortfolioWeights"]]
+
+
+for (BorA in 1:2){
+    for(Portopt in 1:5){
+      for(Cop in 1:4){
+        
+        colnames(a[[BorA]][[Portopt]][[Cop]]) <- paste("Sector","Copula", names(a)[BorA],
+                                                       names(a[[BorA]][[Portopt]])[Cop], 
+                                                       colnames(a[[BorA]][[Portopt]][[Cop]]),sep = ".")
+    }
+  }
+}
+
+Sectors[["Backtesting"]][["PortfolioWeights"]] <- NULL
+
+Sectors[["Backtesting"]] <- list.append(Sectors[["Backtesting"]] ,PortfolioWeights = a)
+
+
+rm(BorA, Cop, Portopt, a)
+```
+
+
+Merging Evolution and Weights
+
+```{r}
+a <- Sectors[["Backtesting"]][["ConvPortfolioEvolution"]]
+b <- Sectors[["Backtesting"]][["PortfolioEvolution"]]
+c <- Sectors[["Backtesting"]][["MarketEvolution"]]
+d <- Sectors[["Backtesting"]][["ConvPortfolioWeights"]]
+e <- Sectors[["Backtesting"]][["PortfolioWeights"]]
+
+
+### $$$$$$$ ************************************************
+MergeEvolution <- merge.xts(a[[1]],a[[2]],b[[1]],b[[2]],c)
+
+
+  MergeWeights <- NULL
+for(BorA in 1:2){
+  for(Portopt in 1:6){
+    
+    MergeWeights <- merge.xts(MergeWeights,d[[BorA]][[Portopt]])
+  }
+}  
+
+ for(BorA in 1:2){
+  for(Portopt in 1:5){
+    for(Cop in 1:4){
+MergeWeights <- merge.xts(MergeWeights,e[[BorA]][[Portopt]][[Cop]])
+  }
+  }   
+ }
+EvolutionandWeights <- merge.xts(MergeEvolution,MergeWeights)
+  
+### $$$$$$$ ******************************************************
+Sectors[["Backtesting"]] <- list.append(Sectors[["Backtesting"]], Sector.EvolutionandWeights = EvolutionandWeights)
+
+rm(a,b,c,d,e,MergeEvolution,MergeWeights,EvolutionandWeights,BorA, Portopt, Cop)
+```
+
+Performance Metrics:
+
+Portfolio * Dependence * Copula Type * Base/Alt * Optimization  *
+
+
+```{r}
+
+a <- Sectors[["Backtesting"]][["ConvPerformanceMetrics"]] 
+b <- Sectors[["Backtesting"]][["PerformanceMetrics"]]
+
+for(BorA in 1:2){
+colnames(a[[BorA]])[-1] <- paste("Sector","Conv","-", names(a)[BorA],colnames(a[[BorA]])[-1],sep = ".")
+colnames(b[[BorA]])[-1] <- gsub(colnames(b[[BorA]])[-1], pattern = ".Returns", replacement = "")
+colnames(b[[BorA]])[-1] <- paste("Sector","Copula", names(b)[BorA],colnames(b[[BorA]])[-1],sep = ".")
+}
+
+c = cbind(as.data.frame((a[[1]])),as.data.frame((a[[2]])),as.data.frame((b[[1]])),as.data.frame((b[[2]])))
+
+c = subset(c , select = which(!duplicated(colnames(c))))
+
+Sectors[["Backtesting"]] <- list.append(Sectors[["Backtesting"]], Sector.AllPerformanceMetrics = t(c))
+
+
+rm(a,b,c,BorA)
+
+
+```
+
+```{r}
+
+
+
+EvolutionAndWeights <- list(Commo = Commodities[[6]][[11]],Fixed = FixedIncome[[6]][[11]],
+                            MarFixCom = MarketFixedCommodities[[6]][[11]], Market = MarketIndices[[6]][[11]],
+                            Sector = Sectors[[6]][[11]]
+                            )
+
+PerformanceM <- list(Commo = Commodities[[6]][[12]],Fixed = FixedIncome[[6]][[12]],
+                     MarFixCom = MarketFixedCommodities[[6]][[12]], Market = MarketIndices[[6]][[12]],
+                     Sector = Sectors[[6]][[12]], 
+                     Alltogether = rbind(Commodities[[6]][[12]],FixedIncome[[6]][[12]],
+                                         MarketFixedCommodities[[6]][[12]],
+                                         MarketIndices[[6]][[12]],Sectors[[6]][[12]])
+                       
+                            )
+
+```
+
+Xts to Data frame
+
+```{r}
+for (i in 1:length(EvolutionAndWeights)){
+EvolutionAndWeights[[i]] <- data.frame(Date = index(EvolutionAndWeights[[i]]), coredata(EvolutionAndWeights[[i]]))
+}
+```
+
+#########################   THe Graphing Starts Here ###################
+
+Create a Matrix of Performance M in Excel
+
+
+Creating Portfolio wise plots
+
+DrawnDown
+```{r}
+library(PerformanceAnalytics)
+library(dplyr)
+
+a <- EvolutionAndWeights[["Commo"]] %>% select(Date, intersect(intersect(contains("Evolution"), contains("Alt")), contains(c("Naive","MinSD","MinES","Sharpe","MaxMean"))))
+
+ret <- data.frame(matrix(data = NA, nrow = nrow(a), ncol = ncol(a)))
+
+colnames(ret) <- colnames(a)
+
+ret[,1] <- a[,1]
+
+for(i in 2:41){
+  ret[i,2:ncol(a)] <- (a[i,2:ncol(a)]/a[i-1,2:ncol(a)])-1
+}
+
+
+Optimization <- c("Naive","MinSD","MinES","Sharpe","MaxMean")
+Copula <- c("Conv","P-R","P-C","E-R","E-C")
+
+for (i in 1:5){
+dd <- ret %>% select(Date, contains(Copula[i])) %>% na.omit() 
+dd <- as.xts(dd[,-1], order.by = dd[,1])
+colnames(dd) <- c("Naive","MinSD","MinES","Sharpe","MaxMean")
+
+}
+#chart.Drawdown(dd, legend.loc = "bottomleft", plot.engine = "ggplot2") # Need to find a way to get it grey sclaed
+
+
+
+```
+
+Chart Evolution Optimization and Copulwise for Alternative Portfolios
+
+Commodities
+```{r}
+
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "Sector", EorW == "Evolution", BorA == "Alt", Opt != "Starr")
+
+b <- ggplot(a, aes(x = Date,y = value, linetype = Opt, group = Opt)) + geom_line() + facet_wrap(~VineType, scales = "free_y") + xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Optimization")
+
+c <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line() + facet_wrap(~Opt, scales = "free_y")+ xlab("") +  ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Dependence")
+
+ggsave("Sector3.pdf",plot = b, width = 10, height = 6)
+ggsave("Sector4.pdf",plot = c, width = 10, height = 6)
+rm(a)
+```
+
+Fixed
+```{r}
+
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "Fixed", EorW == "Evolution", BorA == "Alt", Opt != "Starr")
+
+b<- ggplot(a, aes(x = Date,y = value, linetype = Opt, group = Opt)) + geom_line() + facet_wrap(~VineType, scales = "free_y") + xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Optimization")
+
+c <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line() + facet_wrap(~Opt, scales = "free_y")+ xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Dependence")
+rm(a)
+```
+
+
+
+Sector
+```{r}
+
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "Sector", EorW == "Evolution", BorA == "Alt", Opt != "Starr")
+
+b <- ggplot(a, aes(x = Date,y = value, linetype = Opt, group = Opt)) + geom_line() + facet_wrap(~VineType, scales = "free_y") + xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Optimization")
+
+c <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line() + facet_wrap(~Opt, scales = "free_y") + xlab("")+ ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Dependence")
+rm(a)
+```
+
+Market
+```{r}
+
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "Market", EorW == "Evolution", BorA == "Alt", Opt != "Starr")
+
+b<- ggplot(a, aes(x = Date,y = value, linetype = Opt, group = Opt)) + geom_line() + facet_wrap(~VineType, scales = "free_y") + xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Optimization")
+
+c <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line() + facet_wrap(~Opt, scales = "free_y")+ xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Dependence")
+rm(a)
+```
+
+
+Market Fixed and Commodities
+```{r}
+
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "MarFixCom", EorW == "Evolution", BorA == "Alt", Opt != "Starr")
+
+b <- ggplot(a, aes(x = Date,y = value, linetype = Opt, group = Opt)) + geom_line() + facet_wrap(~VineType, scales = "free_y") + xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Optimization")
+
+c <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line() + facet_wrap(~Opt, scales = "free_y")+ xlab("") + ylab("Evolution (in $)") + theme_classic() + theme(strip.background = element_blank(), legend.position = c(0.8,0.2)) +labs(linetype ="Dependence")
+rm(a)
+```
+
+
+Weights
+
+
+
+```{r}
+a <- EvolutionAndWeights[["AlltogetherLong"]] %>% filter(Portfolio == "Market", EorW == "Weights", BorA == "Alt", Opt != "Starr", Opt != "Naive", Asset %in% c("BTC","LTC","XRP","ETH"))
+
+g1 <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line()  + facet_wrap(Asset~Opt, scales = "free_y")+ xlab("") + ylab("Weights") + theme_classic() + theme(strip.background = element_blank(),strip.text = element_blank(), legend.position = "bottom") +labs(linetype ="Dependence")
+
+g2 <- ggplot(a, aes(x = Date,y = value, linetype = VineType, group =VineType)) + geom_line()  + facet_grid(Asset~Opt, scales = "free_y")+ xlab("") + ylab("Weights") + theme_classic() + theme(strip.background = element_blank()) +labs(linetype ="Dependence")
+
+
+library(grid)
+library(gtable) 
+gt1 = ggplot_gtable(ggplot_build(g1))
+gt2 = ggplot_gtable(ggplot_build(g2))
+gt1$grobs[grep('strip-t.+1$', gt1$layout$name)] = gt2$grobs[grep('strip-t', gt2$layout$name)]
+grid.draw(gt1)
+
+gt.side1 = gtable_filter(gt2,'strip-r-1')
+gt.side2 = gtable_filter(gt2,'strip-r-2')
+gt.side3 = gtable_filter(gt2,'strip-r-3')
+gt.side4 = gtable_filter(gt2,'strip-r-4')
+
+gt1 = gtable_add_cols(gt1, widths=gt.side1$widths[1], pos = -1)
+gt1 = gtable_add_grob(gt1, zeroGrob(), t = 1, l = ncol(gt1), b=nrow(gt1))
+
+panel_id <- gt1$layout[grep('panel-.+1$', gt1$layout$name),]
+gt1 = gtable_add_grob(gt1, gt.side1, t = panel_id$t[1], l = ncol(gt1))
+gt1 = gtable_add_grob(gt1, gt.side2, t = panel_id$t[2], l = ncol(gt1))
+gt1 = gtable_add_grob(gt1, gt.side3, t = panel_id$t[3], l = ncol(gt1))
+gt1 = gtable_add_grob(gt1, gt.side4, t = panel_id$t[4], l = ncol(gt1))
+
+grid.newpage()
+grid.draw(gt1)
+ggsave("Marketweight.pdf",plot = gt1, width = 10, height = 10)
+
+```
+Box Plot
+
+```{r}
+ a<- EvolutionAndWeights[["PortfolioReturnsLong"]] %>% filter(BorA == "Alt", Portfolio == "Commo", Opt != "Starr")
+ 
+  b <- unite(a,VineType, Opt, col = "VineOpt", sep = "_")
+  
+  c <- cbind(a,VineOpt = b[,5])
+
+d <- ggplot(c,aes(x = value, y = VineType)) + geom_boxplot(alpha = 0.3, lwd = 0.2) + facet_wrap(~Opt)+ ylab("Dependence") + xlab("Returns") + theme_classic() + theme(strip.background = element_blank()) + geom_jitter(alpha = 0.3)
+
+e <- ggplot(c,aes(x = value, y = Opt)) + geom_boxplot(alpha = 0.3, lwd = 0.2) + facet_wrap(~VineType, scales = "free")+ ylab("Optimization") + xlab("Returns") + theme_classic() + theme(strip.background = element_blank()) + geom_jitter(alpha = 0.3)
+
+
+
+ggsave("CommoBox1.pdf",plot = d, width = 8, height = 4)
+ggsave("CommoBox2.pdf",plot = e, width = 8, height = 4)
+```
+
+
+For Motivational purposes I show the 
+
+1) Cryptocurrency and Bitcoin Market Cap evolution.
+2) Four cryptocurrencies - Price, Volume and Return Evolution.
+3) BoxPlots for all the assets returns to show the variance. 
+
+
+Extracting Cryptocurrency prices
+```{r}
+library(crypto) #fdownloading cryptocurrency prices from coinmarketcap.com
+library(reshape2) 
+library(xts)
+library(PerformanceAnalytics)
+library(dplyr)
+library(tidyverse)
+
+CryptoPrices <- crypto_history(coin = c("ETH", "XRP","BTC",
+                                        "LTC")
+                                        )
+CryptoPrices <- CryptoPrices[,c("symbol","date","close", "volume")]
+
+CryptoPrices$volume <- CryptoPrices$volume/1000000000
+
+
+colnames(CryptoPrices) <- c("Symbol","Date","Price","Volume") 
+
+
+
+BTC <- CryptoPrices %>% filter(Symbol == "BTC")
+LTC <- CryptoPrices %>% filter(Symbol == "LTC")
+XRP <- CryptoPrices %>% filter(Symbol == "XRP")
+ETH <- CryptoPrices %>% filter(Symbol == "ETH")
+
+BTC$Return <- Return.calculate(as.xts(BTC$Price, order.by = BTC$Date))
+LTC$Return <- Return.calculate(as.xts(LTC$Price, order.by = LTC$Date))
+XRP$Return <- Return.calculate(as.xts(XRP$Price, order.by = XRP$Date))
+ETH$Return <- Return.calculate(as.xts(ETH$Price, order.by = ETH$Date))
+
+
+a<- rbind(BTC,ETH,XRP,LTC)
+
+CryptoPrices <- a
+
+rm(BTC,LTC,XRP,ETH,a)
+
+```
+
+
+2)
+
+```{r}
+library(gtable)
+library(grid)
+library(ggplotify)
+
+crypto <- "ETH"
+
+a <- ggplotGrob(ggplot(data = CryptoPrices %>% filter(Symbol == crypto), aes(x=Date, y = Price)) + geom_line(color = "#1B9E77") + xlab("")  + theme_classic() + theme(axis.text.x = element_blank(),axis.ticks.x = element_blank(), axis.ticks.length =unit(.10, "cm")) + ylab("") + ggtitle("ETH") + theme(plot.margin=unit(c(0.1,0,0,0),"cm"), plot.title = element_text(hjust = 0.5, size = 15))) 
+
+b <- ggplotGrob(ggplot(data = CryptoPrices %>% filter(Symbol == crypto), aes(x=Date, y = Volume)) + geom_area(fill = "#E6AB02", alpha = 0.5) + xlab("")  + theme_classic()  + theme(axis.text.x = element_blank(),axis.ticks.x = element_blank())  + ylab("") +theme(plot.margin=unit(c(0,0,0,0),"mm")))
+
+c <- ggplotGrob(ggplot(data = CryptoPrices %>% filter(Symbol == crypto), aes(x=Date, y = Return)) + geom_line(color = "#7570B3") + xlab("")+ theme_classic() + ylab("")+theme(plot.margin=unit(c(0,0,0,0),"mm")))
+
+g <- rbind(a,b,c, size = "first")
+
+g$widths <- unit.pmax(a$widths, b$widths, c$widths)
+
+a <-as.ggplot(g)
+
+ggsave('ETH.pdf', a, height = 5, width = 6)
+
+
+```
+
+
+3) 
+
+```{r}
+a <- prices[,c("Dates","SP500","DJIA","NASDAQ","IT","ENERGY","HEALTH","UTILITY","FINANCIAL","CONSD","CONSS","COMM","INDUS","REAL","MATERIAL","GOLD","SILVER","PLATINUM","CRUDE","USJUNK","USGOVT10","USCORP")] %>% na.omit()
+
+b <- prices[,c("Dates","BTC","LTC","XRP","ETH")]
+
+ret2 <- as.xts(b[,-c(1)],order.by = b$Dates) %>% Return.calculate()
+  
+ret <-  as.xts(a[,-c(1)],order.by = a$Dates) %>% Return.calculate()
+
+returns <- cbind.xts(ret2,ret)
+
+returns_df <- as.data.frame(returns)
+
+returns_df <- cbind(Dates = index(returns),returns_df)
+
+mreturns <- melt(returns_df, id.vars = ("Dates"))
+
+ 
+
+z <- ggplot(data = mreturns, aes(x = value, y = variable, group = variable))+ geom_jitter(alpha = 0.1, color = "grey") + geom_boxplot(alpha = 0.3, lwd = 0.5, color = "black", outlier.shape = NA) + theme_classic() + theme(strip.background = element_blank()) + xlab("Daily Returns") + ylab("") + scale_x_continuous(breaks = round(seq(min(mreturns$value, na.rm = TRUE), max(mreturns$value, na.rm = TRUE), by = 0.25),2)) + ylab("Assets")
+
+ggsave("AssetBox.pdf",z, height = 5, width = 6)
+
+```
+
+

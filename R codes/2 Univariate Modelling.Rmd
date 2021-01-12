@@ -1,0 +1,235 @@
+---
+title: "Univariate Modelling"
+output: html_notebook
+---
+
+```{r}
+library(rugarch)
+library(lestat)
+library(gdata)
+library(stats)
+library(fBasics)
+library(tictoc)
+```
+
+SUB-PORTFOLIOS   -----------  UNIVARIATE MARGINAL DISTRIBUTION MODELLING
+
+1) ARMA-GARCH Modelling
+
+Select one of the models from below
+
+i)
+gjr.arma0.0 <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1), submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+                  mean.model = list(armaOrder = c(0, 0)), distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+
+ii)
+gjr.arma1.0 <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1), submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+                          mean.model = list(armaOrder = c(1, 0)), distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+
+iii)
+gjr.arma1.1 <- ugarchspec(variance.model = list(model = "gjrGARCH", garchOrder = c(1,1), submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+                          mean.model = list(armaOrder = c(1, 1)), distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+
+iv)
+garch.arma0.0 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1), variance.targeting = TRUE),
+                             mean.model = list(armaOrder = c(0, 0)), distribution.model = "sstd")
+garch.arma1.0 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1), submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+                            mean.model = list(armaOrder = c(1, 0)), distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+
+v)
+garch.arma1.1 <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1), submodel = NULL, external.regressors = NULL, variance.targeting = FALSE),
+                            mean.model = list(armaOrder = c(1, 1)), distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+
+```{r}
+
+Model <- ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(1,1)
+                                          ,submodel = NULL, external.regressors = NULL,
+                                          variance.targeting = FALSE),
+                    mean.model = list(armaOrder = c(0, 0)),
+                    distribution.model = "sstd", start.pars = list(),fixed.pars = list())
+```
+
+
+```{r}
+AssetReturns <- SubFull
+NoofRebalPeriod <-length(AssetReturns)
+
+
+Modelfit <- CondHTEMP  <- ConvergenceTEMP <- GARCHModelTEMP <- DistributionTEMP <-rep(list(list()),NoofRebalPeriod)
+CondH <- Convergence <-  GARCHModel <- Distribution <- data.frame(matrix(nrow = NoofRebalPeriod, ncol = ncol(AssetReturns[[NoofRebalPeriod]])))
+colnames(CondH) <- colnames(Convergence) <- colnames(GARCHModel) <- colnames(Distribution) <- names(AssetReturns[[NoofRebalPeriod]])
+
+
+for ( PeriodNo in 1:NoofRebalPeriod){
+  NoofAssets <- ncol(AssetReturns[[PeriodNo]])
+  Modelfit[[PeriodNo]] <- rep(list(list()),NoofAssets)
+  CondHTEMP[[PeriodNo]] <- ConvergenceTEMP[[PeriodNo]] <- GARCHModelTEMP[[PeriodNo]] <-      
+    DistributionTEMP[[PeriodNo]] <-  vector(mode = "logical", length = NoofAssets)
+  names(CondHTEMP[[PeriodNo]]) <- names(ConvergenceTEMP[[PeriodNo]]) <- names(GARCHModelTEMP[[PeriodNo]]) <- 
+    names(DistributionTEMP[[PeriodNo]]) <- colnames(AssetReturns[[PeriodNo]])
+
+  for (AssetNo in 1:NoofAssets){
+    Modelfit[[PeriodNo]][[AssetNo]] <-  ugarchfit(data = AssetReturns[[PeriodNo]][,AssetNo],spec = Model, solver = 
+                                                    "hybrid")
+    CondHTEMP[[PeriodNo]][AssetNo]        <-   Modelfit[[PeriodNo]][[AssetNo]]@fit[["condH"]]
+    ConvergenceTEMP[[PeriodNo]][AssetNo]  <-   Modelfit[[PeriodNo]][[AssetNo]]@fit[["convergence"]]
+    GARCHModelTEMP[[PeriodNo]][AssetNo] <- Modelfit[[PeriodNo]][[AssetNo]]@model[["modeldesc"]][["vmodel"]]
+    DistributionTEMP[[PeriodNo]][AssetNo] <- Modelfit[[PeriodNo]][[AssetNo]]@model[["modeldesc"]][["distribution"]]
+  }
+  names(Modelfit[[PeriodNo]]) <- names(AssetReturns[[PeriodNo]])  
+    
+  unlis <-  unlist(CondHTEMP[[PeriodNo]])
+  CondH[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)
+  unlis <-  unlist(ConvergenceTEMP[[PeriodNo]])
+  Convergence[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)
+  unlis <-  unlist(GARCHModelTEMP[[PeriodNo]])
+  GARCHModel[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)
+  unlis <-  unlist(DistributionTEMP[[PeriodNo]])
+  Distribution[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)
+}
+
+ModelFit <- list(Modelfit = Modelfit, CondH = CondH, Convergence = Convergence, GARCHModel = GARCHModel, Distribution = Distribution)
+
+rm(AssetReturns,NoofRebalPeriod,NoofAssets,PeriodNo,AssetNo,Model,ConvergenceTEMP, CondHTEMP,Modelfit,CondH,Convergence, DistributionTEMP,GARCHModelTEMP,Distribution,GARCHModel)
+
+```
+
+Extracting the Standardized Residuals
+
+```{r}
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+Modelfit <- ModelFit[["Modelfit"]]
+observations <-  500 
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+NoofRebalPeriod <- length(Modelfit)
+StdzedResiduals <- rep(list(list()),NoofRebalPeriod)
+
+for (PeriodNo in 1:NoofRebalPeriod){
+  NoofAssets <- length(Modelfit[[PeriodNo]])
+  StdzedResiduals[[PeriodNo]] <- matrix(nrow = observations , ncol = NoofAssets)
+  colnames(StdzedResiduals[[PeriodNo]])   <-   names(Modelfit[[PeriodNo]])
+  AssetnameS <- names(Modelfit[[PeriodNo]])
+  for (AssetNo in 1 : NoofAssets){  
+    AssetnamE <- AssetnameS[AssetNo]
+    StdzedResiduals[[PeriodNo]][,AssetnamE] <- rugarch::residuals(Modelfit[[PeriodNo]][[AssetnamE]] 
+                                                                  ,standardize =TRUE)
+  }
+}
+
+
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+Std.Resids <- StdzedResiduals
+#@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+rm(Modelfit,NoofRebalPeriod,NoofAssets,PeriodNo,AssetNo,StdzedResiduals, observations, AssetnameS,AssetnamE)
+
+```
+
+
+
+EXTRACT the ARMA-GARCH Parameters
+(The below codes are assuming the same number of parameters for all the Assets.)
+
+```{r}
+
+Modelfit <- ModelFit[["Modelfit"]]
+
+NoofRebalPeriod <- length(Modelfit)
+  
+ParamList <- rep(list(list()),NoofRebalPeriod)
+
+for(PeriodNo in 1:NoofRebalPeriod){
+  NoofAssets <- length(Modelfit[[PeriodNo]])
+  cnames <- names(Modelfit[[PeriodNo]])
+  rnames <- names(Modelfit[[1]][[1]]@fit[["coef"]]) #using the first asset from period 1 for the coef names.
+  ParamList[[PeriodNo]] <- rep(list(matrix(nrow = length(rnames) , ncol = NoofAssets, dimnames = list(rnames, 
+                                                                                                      cnames))),3)
+  names(ParamList[[PeriodNo]]) <- c("Parameters","RobustStdErrors","Tvalues")
+  for (AssetNo in 1:NoofAssets){
+    ParamList[[PeriodNo]][[1]][,AssetNo] <- round(Modelfit[[PeriodNo]][[AssetNo]]@fit[["coef"]],4)
+    ParamList[[PeriodNo]][[2]][,AssetNo] <- round(Modelfit[[PeriodNo]][[AssetNo]]@fit[["robust.se.coef"]],4)
+    ParamList[[PeriodNo]][[3]][,AssetNo] <- round(Modelfit[[PeriodNo]][[AssetNo]]@fit[["robust.tval"]],4)
+  }
+}
+Parameters <- ParamList  
+
+rm(Modelfit, PeriodNo,AssetNo,NoofAssets,NoofRebalPeriod,cnames,rnames,ParamList)
+
+
+```
+
+                                    Empirical and Parametric Distribution    
+ 
+ Parametric Distribution of the STD Resids #######
+ 
+ 1) Fit the distribution i.e consider the parameters
+```{r}
+
+StdResTEMP <- Std.Resids
+ParamTEMP <- Parameters
+NoofRebalPeriod =length(StdResTEMP)
+observations = 500
+PITTemp <- rep(list(list()),NoofRebalPeriod)
+for (PeriodNo in 1:NoofRebalPeriod){
+    DistTemp <- ParamTEMP[[PeriodNo]][["Parameters"]][(nrow(ParamTEMP[[PeriodNo]][["Parameters"]])-1):
+                                                        nrow(ParamTEMP[[PeriodNo]][["Parameters"]]),]
+    NoofAssets <- ncol(DistTemp) 
+    cnames <- colnames(StdResTEMP[[PeriodNo]])
+    PITTemp[[PeriodNo]] <-  matrix(nrow = observations, ncol = NoofAssets, dimnames = list(NULL,cnames))
+    for ( AssetNo in 1:NoofAssets){ 
+       PITTemp[[PeriodNo]][,AssetNo] <- pdist(distribution = "sstd",StdResTEMP[[PeriodNo]][,AssetNo],
+                                              mu= 0, sigma = 1, skew = DistTemp["skew",AssetNo], 
+                                              shape = DistTemp["shape",AssetNo])
+                                                
+    }
+}
+
+PIT <- PITTemp
+
+rm(observations,PeriodNo,AssetNo,NoofRebalPeriod,NoofAssets,DistTemp,ParamTEMP,StdResTEMP,PITTemp,cnames)
+```
+
+
+2)  empirical CDF
+```{r}
+
+ResTEMP <- Std.Resids
+observations = 500
+NoofRebalPeriod = length(ResTEMP)
+EmpTEMP <- rep(list(list()),NoofRebalPeriod)
+for (PeriodNo in 1:NoofRebalPeriod){
+  NoofAssets = ncol(ResTEMP[[PeriodNo]]) 
+  cnames <- colnames(ResTEMP[[PeriodNo]])
+  EmpTEMP[[PeriodNo]] <-  matrix(nrow = observations, ncol = NoofAssets, dimnames = list(NULL,cnames))
+  
+  for (AssetNo in 1: NoofAssets){
+    empiricalCDF <- ecdf(ResTEMP[[PeriodNo]][,AssetNo])
+    EmpTEMP[[PeriodNo]][,AssetNo] <-  empiricalCDF(ResTEMP[[PeriodNo]][,AssetNo])
+  }
+}  
+
+EMP <- EmpTEMP
+
+rm(observations,cnames,PeriodNo,AssetNo,NoofRebalPeriod,NoofAssets,empiricalCDF, EmpTEMP, ResTEMP)
+```
+
+Join them together in UniformDist
+
+```{r}
+UniformDist <- list(Udist = PIT,  Uedf = EMP)
+
+rm(PIT,EMP)
+```
+
+PROCESS 3: Joint Dependence Structure using Vine Copula -- refer to Copula codes.Rmd
+                       
+                       
+
+
+
+
+

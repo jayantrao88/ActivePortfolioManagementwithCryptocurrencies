@@ -1,0 +1,227 @@
+---
+title: "5b Backtesting Conventional"
+output: html_notebook
+---
+
+
+
+
+For Backtesting we follow the below steps:
+
+1) Compare Base, Alternative and Sp500 Return performance
+   For the Performance Metrics of the three portfolios, we use the below indicators
+    i) Evolution over the investmet period
+   ii) Annualized Mean
+   iii) Annualized Standard Deviation 
+   iv) Compounded Annual Growth Rate (CAGR)
+   
+2) Weights Graph of Cryptocurrencies for each period 
+
+All the above is carried on a combination of the below for Base and Alternative Portfolio:
+
+
+```{r, echo=FALSE}
+library(fBasics)
+library(readxl)
+library(gdata)
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+library(ROI)
+library(flextable)
+library(officer)
+library(dplyr)
+library(gdata)
+library(profvis)
+library(tictoc)
+library(xts)
+library(rlist)
+library(magrittr)
+```
+
+
+Extracting the required data from respective portfolios
+```{r}
+SubFullBackTesting <- Sectors[["SubFullBackTesting"]]
+prices <- Sectors[["prices"]]
+ConvPortfolioWeights <- Sectors[["ConvPortfolioWeights"]]
+
+
+
+```
+
+
+
+
+Market Portfolio (SP500)
+ 
+```{r}
+library(PerformanceAnalytics)
+NoofRebalancingPeriod <- length(SubFullBackTesting)
+
+MarketIndex <- "SP500"
+MarketPort <-  prices %>% select(c(eval(MarketIndex))) %>%  as.xts(order.by = prices[,1]) %>% na.omit %>% Return.calculate(method = "log") %>% na.omit
+rm(MarketIndex)
+
+library(rlist)
+SubMarketPort <- list()
+for (PeriodNo in 1:length(SubFullBackTesting)){
+TempDate <- index(SubFullBackTesting[[PeriodNo]])   
+SubMarketPort[[PeriodNo]] <-  MarketPort[paste(TempDate[1],"/",TempDate[500],sep=""),]
+}
+
+#Extracting the Returns for the last 30 days of each Investment period
+
+multiple.fun <- function(x){
+    Dt <- xts::last(x) %>% index %>% as.Date}
+
+a<- lapply(SubMarketPort, multiple.fun)
+a<- Reduce(c,a)
+MarketReturns <- as.data.frame(matrix(nrow = NoofRebalancingPeriod, ncol = 2))
+for(PeriodNo in 1:NoofRebalancingPeriod){
+   MarketReturns[PeriodNo,2] <- xts::last(SubMarketPort[[PeriodNo]], n = 30) %>% colSums() %>% expm1() #Converting ln(r) to arithematic
+   MarketReturns[PeriodNo,1] <- as.character(a[[PeriodNo]])
+}
+
+MarketReturns<- as.xts(MarketReturns[,-1], order.by = as.Date(MarketReturns[,1]))
+MarketReturns <- MarketReturns[-1,]
+MR <- xts(x = 0, order.by = as.Date("2015-04-29"))
+#xts(x = t(rep(0,ncol(PortfolioReturns[[PortType]]))), order.by = as.Date("2015-04-29"))
+names(MR) <- names(MarketReturns) <- "SP500"
+MR <- rbind.xts(MR, MarketReturns)
+
+MarketEvolution <- cumprod(MR+1)
+names(MarketEvolution) <- "SP500"
+
+rm(a, PeriodNo, NoofRebalancingPeriod, MR, TempDate, SubMarketPort)
+
+
+```
+
+FullPort
+
+```{r}
+NoofRebalancingPeriod <- length(SubFullBackTesting)
+NoofAssets <- ncol(SubFullBackTesting[[NoofRebalancingPeriod]])
+
+a<- lapply(SubFullBackTesting, multiple.fun)
+a<- Reduce(c,a)
+
+AssetReturns <- as.data.frame(matrix(nrow = NoofRebalancingPeriod, ncol = NoofAssets, dimnames = list(NULL,colnames(SubFullBackTesting[[NoofRebalancingPeriod]]))))
+
+TempDate <- matrix(matrix(nrow = NoofRebalancingPeriod, ncol = 1))
+
+for(PeriodNo in 1:NoofRebalancingPeriod){
+   AssetReturns[PeriodNo,colnames(SubFullBackTesting[[PeriodNo]])] <- xts::last(SubFullBackTesting[[PeriodNo]], n = 30) %>% colSums() %>% expm1() #Converting ln(r) to arithematic
+   
+   TempDate[PeriodNo,] <- as.character(a[[PeriodNo]])
+}
+
+AssetReturns <- as.xts(AssetReturns, order.by = as.Date(TempDate))
+
+
+rm(a,NoofRebalancingPeriod,NoofAssets)
+
+```
+
+DateStamp the Portfolio Weights
+
+```{r}
+for (PortType in 1:2){
+   for (OptimizationType in 1:6){
+      ConvPortfolioWeights[[PortType]][[OptimizationType]] <- as.xts(ConvPortfolioWeights[[PortType]][[OptimizationType]], order.by = as.Date(TempDate))
+  }
+ }
+
+rm(PortType,OptimizationType)
+```
+
+
+Creating Portfolio Returns and Evolution
+
+Initializing the variables -- PortfolioReturns and Evolution
+```{r, echo=FALSE}
+
+ConvPortfolioReturns <- list(Base = list(NaivePortfolio = list(), MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()), Alt = list(NaivePortfolio = list(), MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()))
+
+ConvPortfolioEvolution <- list(Base = list(), Alt = list())
+```
+
+```{r}
+
+for (PortType in 1:2){
+
+   for (OptimizationType in 1:6){
+   
+  Copulas <- NULL
+   
+      a <- lag.xts(ConvPortfolioWeights[[PortType]][[OptimizationType]])
+      a <- a[-1,]
+      
+      TempCop <- a * AssetReturns[, colnames(a)]
+      c <- index(TempCop)
+      Copulas <- as.xts(rowSums(TempCop, na.rm = TRUE), order.by = c)
+      rm(TempCop,a)
+   
+   colnames(Copulas) <- names(ConvPortfolioWeights[[PortType]])[OptimizationType]
+   ConvPortfolioReturns[[PortType]][[OptimizationType]] <-   Copulas
+ #ConvPortfolioReturns[[PortType]][[OptimizationType]] <- as.xts(PortfolioReturns[[PortType]][[OptimizationType]], order.by = c)
+ #colnames(ConvPortfolioReturns[[PortType]][[OptimizationType]]) <- gsub(x = colnames(ConvPortfolioReturns[[PortType]][[OptimizationType]]), "Weights","Returns")
+ rm(c)
+   }
+   ConvPortfolioReturns[[PortType]]<- do.call(cbind,ConvPortfolioReturns[[PortType]])
+  z<- xts(x = t(rep(0,ncol(ConvPortfolioReturns[[PortType]]))), order.by = as.Date("2015-04-29")) # Don't forget to change the first investment date from 2015-04-29 
+colnames(z) <- colnames(ConvPortfolioReturns[[PortType]])
+   z <- rbind.xts(z,ConvPortfolioReturns[[PortType]]) 
+   ConvPortfolioEvolution[[PortType]] <-  cumprod(z+1)
+   rm(z)
+}
+
+rm(OptimizationType,PortType)
+```
+
+
+
+Calculating Annualized Returns, Standard Deviation and CAGR of the Portfolios
+
+Annualized Returns and Std Deviation ---- Returns
+
+CAGR ---- Evolution
+
+```{r}
+pfactor <- 252/30
+
+   ConvPerformanceMetrics <- list()
+   for(PortType in 1:2){
+      
+      Evolution <- merge.xts(MarketEvolution,ConvPortfolioEvolution[[PortType]])
+      Returns <- merge.xts(MarketReturns,ConvPortfolioReturns[[PortType]])
+      
+      CAGR <- Evolution[nrow(Evolution),]^(pfactor/(nrow(Evolution)-1)) - 1
+      CAGR <- setNames(as.numeric(CAGR), colnames(CAGR))
+      MEAN <- colMeans(Returns)*pfactor
+      STD <- colStdevs(Returns)*sqrt(pfactor)
+      
+      g <- cbind(MEAN,STD,CAGR)
+      ConvPerformanceMetrics[[PortType]] <- t(g)
+      
+      rm(Evolution, Returns, CAGR, MEAN, STD,g)
+   }
+   
+   names(ConvPerformanceMetrics) <- c("Base","Alt")
+   
+rm(pfactor, PortType)   
+```
+
+
+```{r}
+
+Sectors <- list.append(Sectors, Backtesting = list(ConvPerformanceMetrics = ConvPerformanceMetrics, ConvPortfolioEvolution = ConvPortfolioEvolution, MarketEvolution = MarketEvolution, ConvPortfolioReturns = ConvPortfolioReturns, MarketReturns = MarketReturns, ConvPortfolioWeights = ConvPortfolioWeights))
+
+rm(ConvPerformanceMetrics,ConvPortfolioEvolution,MarketEvolution,ConvPortfolioReturns,MarketReturns, MarketPort)
+rm(TempDate, Copulas, PeriodNo, AssetReturns)
+rm(SubFullBackTesting,prices,ConvPortfolioWeights)
+```
+
+
+Part 6: Report Generation and such
+

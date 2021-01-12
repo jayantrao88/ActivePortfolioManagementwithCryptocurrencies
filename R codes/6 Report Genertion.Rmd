@@ -1,0 +1,150 @@
+---
+title: "6 Report Generation"
+output: html_notebook
+---
+
+
+1) Performance Metrics
+2) Evolution Graphs
+3) Weight over a period of Time Graphs
+4) Correlation and Copula Dependence Numbers and Graphs
+5) R and C Copula Tree Graphs
+
+
+1) Performance Metrics
+Conventional
+```{r}
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+Port <- c("Base", "Alt")
+Metric <- NULL
+Metric <- as.data.frame(ConvPerformanceMetrics[["Base"]][,"SP500"])
+colnames(Metric) <- "SP500"
+for(Optim in 1:length(OptimizationMethod)){
+  for (PortType in 1:2){
+    dataTemp <- NULL
+    dataTemp <- as.data.frame(ConvPerformanceMetrics[[PortType]][,OptimizationMethod[Optim]])
+    colnames(dataTemp) <- paste("Conventional",OptimizationMethod[Optim],Port[PortType],sep = ".")
+    Metric <- cbind(Metric,dataTemp)
+  }
+}
+rm(OptimizationMethod,Optim,PortType, Port, dataTemp)
+```
+Copula
+```{r}
+CopulaType <- c("P.R","P.C", "E.R", "E.C")
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+Port <- c("Base", "Alt")
+for(Cop in 1:4){
+  for(Optim in 1:length(OptimizationMethod)){
+    for (PortType in 1:2){
+          dataTemp <- a <- NULL
+          a <- paste(CopulaType[Cop],OptimizationMethod[Optim],"Returns", sep = ".")  
+          dataTemp <- as.data.frame(PerformanceMetrics[[PortType]][,a])
+          colnames(dataTemp) <- paste(CopulaType[Cop],OptimizationMethod[Optim],Port[PortType],sep = ".")
+          Metric <- cbind(Metric,dataTemp) 
+    
+    }
+  }
+}
+Metric <- t(Metric)
+rm(OptimizationMethod,Optim,PortType, Port, dataTemp, Cop,a,CopulaType)
+```
+
+2) Portfolio Evolution
+Conventional 
+```{r}
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+
+par(mfrow = c(2, 3))  # Set up a 2 x 3 plotting space
+
+for(Optim in 1:length(OptimizationMethod)){
+  a <- merge.xts(MarketEvolution,ConvPortfolioEvolution[["Base"]][,OptimizationMethod[Optim]],
+                 ConvPortfolioEvolution[["Alt"]][,OptimizationMethod[Optim]])
+  colnames(a) <- c("SP500",paste("Base",OptimizationMethod[Optim],sep = "."),
+                   paste("Alt",OptimizationMethod[Optim],sep = ".")) 
+  print(plot.xts(a, auto.legend =FALSE, legend.names = colnames(a),
+                 legend.loc = "topleft", main = "", grid.col = NA))
+}
+
+rm(a,Optim,OptimizationMethod)  
+  
+```
+
+Copula
+
+```{r}
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+
+CopType <- c("P.R","P.C","E.R","E.C")
+par(mfrow = c(2, 3))  # Set up a 2 x 3 plotting space
+
+for (Cop in 1:length(CopType)){
+  for(Optim in 1:length(OptimizationMethod)){
+  
+    name <- paste(CopType[Cop],OptimizationMethod[Optim],"Returns", sep = ".")
+    a<- merge.xts(MarketEvolution,PortfolioEvolution[["Base"]][,name],PortfolioEvolution[["Alt"]][,name])
+    
+colnames(a) <- c("SP500",paste("Base",CopType[Cop],OptimizationMethod[Optim],sep = "."),paste("Alt",CopType[Cop],OptimizationMethod[Optim],sep = "."))   
+
+  print(plot.xts(a, auto.legend =FALSE, legend.names = colnames(a), legend.loc = "topleft", main = "", grid.col = NA))
+ 
+}
+} 
+
+rm(OptimizationMethod,CopType,Cop,Optim)
+```
+
+
+3) Asset Weights in a Portfolio over the period.
+
+Conventional 
+```{r}
+library(reshape2)
+
+LongConvPortfolioWeights <- NULL
+
+Port <- c("Base", "Alt")
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+for(PortType in 1:2){
+  for(optim in 1:length(OptimizationMethod)){
+    a <- data.frame(index(ConvPortfolioWeights[[Port[PortType]]][[OptimizationMethod[optim]]]),
+                    data.frame(coredata(ConvPortfolioWeights[[Port[PortType]]][[OptimizationMethod[optim]]])))
+    names(a)[1] <- "Dates"
+    a <- melt(a, id.vars = "Dates")
+    names(a)[2:3] <- c("Asset","Weights")
+    a <- data.frame(a, data.frame(optim = rep(OptimizationMethod[optim],nrow(a))))
+    a <- data.frame(a, data.frame(Type = rep("Conventional",nrow(a))))
+    a <- data.frame(a, data.frame(PortType = rep(Port[PortType],nrow(a))))
+    LongConvPortfolioWeights <- rbind(LongConvPortfolioWeights, a)
+  }
+}
+```
+
+Copula
+```{r}
+LongPortfolioWeights <- NULL
+Port <- c("Base", "Alt")
+OptimizationMethod <- c("Naive", "MinSD", "MinES", "Sharpe", "Starr", "MaxMean")
+CopType <- c("P.R","P.C","E.R","E.C")
+
+for(PortType in 1:2){
+  for(optim in 1:length(OptimizationMethod)){
+    for(Cop in 1:4){
+      a <- data.frame(index(PortfolioWeights[[Port[PortType]]][[optim]][[Cop]]),
+                      data.frame(coredata(PortfolioWeights[[Port[PortType]]][[optim]][[Cop]])))
+      names(a)[1] <- "Dates"
+      a <- melt(a, id.vars = "Dates")
+      names(a)[2:3] <- c("Asset","Weights")
+      a <- data.frame(a, data.frame(optim = rep(OptimizationMethod[optim],nrow(a))))
+      a <- data.frame(a, data.frame(Type = rep(CopType[Cop],nrow(a))))
+      a <- data.frame(a, data.frame(PortType = rep(Port[PortType],nrow(a))))
+      LongPortfolioWeights <- rbind(LongPortfolioWeights, a)
+      }  
+  }
+}
+
+AllPortfolioWeights <- rbind(LongPortfolioWeights,LongConvPortfolioWeights)
+
+rm(LongPortfolioWeights,LongConvPortfolioWeights)  
+```
+

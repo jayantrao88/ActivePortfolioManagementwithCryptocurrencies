@@ -1,0 +1,393 @@
+---
+title: "Portfolio Optimization"
+output: html_notebook
+---
+
+Producing some preliminary results to see how the simulated results look
+
+```{r, echo=FALSE, include=FALSE}
+library(fBasics)
+library(readxl)
+library(gdata)
+library(PortfolioAnalytics)
+library(PerformanceAnalytics)
+library(ROI)
+library(flextable)
+library(officer)
+library(dplyr)
+library(gdata)
+library(profvis)
+library(tictoc)
+library(rlist)
+library(parallel)
+library(DEoptim)
+library(pso)
+library(GenSA)
+library(pbmcapply)
+```
+
+```{r}
+Unequal_df <- function(LIST){
+  
+NoofRebalPeriod <- length(LIST)
+
+out <-   data.frame(matrix(nrow = NoofRebalPeriod, ncol = length(LIST[[NoofRebalPeriod]])))
+colnames(out)  <- names(LIST[[NoofRebalPeriod]])  
+
+for (PeriodNo in 1:NoofRebalPeriod){
+unlis <-  unlist(LIST[[PeriodNo]])
+  out[PeriodNo,names(unlis)] <- t(unlis) 
+  rm(unlis)  
+}
+output <- out  
+}
+```
+
+
+With the set of simulated returns I will be optimizing the portoflio (calculating the optimal portfolio weights) using different optimization techniques.
+
+Optimization Techniques
+
+1) 1/N or Naive Portfolio
+2) Minimum Standard Deviation Portfolio
+3) Minimum Expected Shortfall Portfolio
+4) Sharpe Portfolio
+5) STARR Portfolio
+6) Maximum Mean Portfolio
+
+Initializing the variables -- PortfolioWeights and PortfolioOptimization.
+```{r, echo=FALSE}
+
+PortfolioWeights <- list(Base = list(NaivePortfolio = list(), MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()), Alt = list(NaivePortfolio = list(), MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()))
+
+PortfolioOptimization <- list(Base = list(MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()), Alt = list(MinSD = list(), MinES = list(), Sharpe = list(), Starr = list(), MaxMean = list()))
+```
+
+1) 1/N or Naive Portfolio
+
+```{r, echo=FALSE}
+
+for(PortType in 1:2){
+
+if (length(PortfolioWeights[[PortType]][["NaivePortfolio"]]) != 0 ){PortfolioWeights[[PortType]][["NaivePortfolio"]] <- list()}
+
+simreturns <- Sim.Returns[[PortType]]
+Pweights <- list()
+
+for (CopulaType in 1:4){
+  AssetsforOptimization = simreturns[[CopulaType]]
+  NoofRebalPeriod = length(AssetsforOptimization)
+
+  weights <- list()
+
+  for (PeriodNo in 1:NoofRebalPeriod){
+    NoofAssets <- ncol(AssetsforOptimization[[PeriodNo]])
+    
+    Rownames <- colnames(AssetsforOptimization[[PeriodNo]])
+    TempWeights <- as.numeric(rep(1/NoofAssets, each = NoofAssets))
+    names(TempWeights) <- Rownames
+    weights <- list.append(weights,TempWeights)
+  }
+  weights <- Unequal_df(weights)
+  Pweights <- list.append(Pweights, weights)
+}
+
+  names(Pweights) <- c("P.R.Naive.Weights","P.C.Naive.Weights","E.R.Naive.Weights","E.C.Naive.Weights")
+  PortfolioWeights[[PortType]][["NaivePortfolio"]] <- Pweights
+
+  rm(AssetsforOptimization, PeriodNo, NoofAssets, Rownames,TempWeights, weights, CopulaType, NoofRebalPeriod, 
+     simreturns)
+}
+rm(PortType)
+```
+
+2) Minimum Standard Deviation Portfolio
+
+```{r,echo=FALSE}
+for(PortType in 1:2){
+  tic(sprintf("PortType %d", PortType))     
+  if (length(PortfolioWeights[[PortType]][["MinSD"]]) != 0 )
+    {PortfolioWeights[[PortType]][["MinSD"]] <- list()}
+  if (length(PortfolioOptimization[[PortType]][["MinSD"]]) != 0 )
+    {PortfolioOptimization[[PortType]][["MinSD"]] <- list()}
+    
+  simreturns <- Sim.Returns[[PortType]]
+  Pweights <- list()
+  Popt <- list()
+  
+  for (CopulaType in 1:4){
+    tic(sprintf("CopulaType %d", CopulaType))    
+    AssetsforOptimization = simreturns[[CopulaType]]
+    NoofRebalPeriod = length(AssetsforOptimization)
+    weights <-  opt <- list()
+    
+    MinSDOpt <- function(AssetOptim){
+                      init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                      #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                       init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                       min_sum = 0.99, max_sum = 1.01) 
+                       init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                     
+                      init.portfolio <- add.objective(portfolio=init.portfolio, type="risk", name="var")
+                      optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                                         optimize_method = "ROI",trace = TRUE,message = T)
+                      out <- optimized
+                      return(out)
+    }
+    
+    numCores <- detectCores() 
+    opt <- pbmcapply::pbmclapply(AssetsforOptimization,MinSDOpt, mc.cores = numCores)
+    weights <- lapply(opt, function(x){x$weights})
+    
+    weights <- Unequal_df(weights)
+    Pweights <- list.append(Pweights, weights)
+    
+    Popt <- list.append(Popt, opt)
+    toc()
+  }
+  names(Pweights) <- c("P.R.MinSD.Weights","P.C.MinSD.Weights","E.R.MinSD.Weights","E.C.MinSD.Weights")
+  
+  names(Popt) <- c("P.R.MinSD.Optimization","P.C.MinSD.Optimization","E.R.MinSD.Optimization","E.C.MinSD.Optimization")
+  PortfolioWeights[[PortType]][["MinSD"]] <- Pweights
+  PortfolioOptimization[[PortType]][["MinSD"]] <- Popt
+  rm(opt,weights, CopulaType, NoofRebalPeriod, AssetsforOptimization,simreturns)
+  toc()
+}
+
+rm(PortType)
+
+```
+
+3) Minimum Expected Shortfall Portfolio
+
+```{r}
+for(PortType in 2){
+  tic(sprintf("PortType %d", PortType))    
+  if (length(PortfolioWeights[[PortType]][["MinES"]]) != 0 )
+    {PortfolioWeights[[PortType]][["MinES"]] <- list()}
+  if (length(PortfolioOptimization[[PortType]][["MinES"]]) != 0 )
+    {PortfolioOptimization[[PortType]][["MinES"]] <- list()}
+    
+  simreturns <- Sim.Returns[[PortType]]
+  Pweights <- list()
+  Popt <- list()
+  
+  if (length(PortfolioWeights[["MinES"]]) != 0 )
+    {PortfolioWeights[["MinES"]] <- list()}
+  if (length(PortfolioOptimization[["MinES"]]) != 0 )
+    {PortfolioOptimization[["MinES"]] <- list()}
+  
+  for (CopulaType in 1){
+    tic(sprintf("CopulaType %d", CopulaType))    
+    AssetsforOptimization = simreturns[[CopulaType]]
+    NoofRebalPeriod = length(AssetsforOptimization)
+    weights <- opt <- list()
+    
+      MinESopt <- function(AssetOptim){
+                  init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                 #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                       init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                       min_sum = 0.99, max_sum = 1.01) 
+                       init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                  
+                  init.portfolio <- add.objective(portfolio=init.portfolio, type="risk", name="ES", arguments=list(method = c("historical")))
+                  optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                           optimize_method = "ROI",trace = TRUE,message = T)
+                  out <- optimized
+                  return(out)
+                  }
+    numCores <- detectCores() - 2
+    opt <- pbmcapply::pbmclapply(AssetsforOptimization,MinESopt, mc.cores = numCores)
+    weights <- lapply(opt, function(x){x$weights})
+    weights <- Unequal_df(weights)
+    Pweights <- list.append(Pweights, weights)
+    Popt <- list.append(Popt, opt)
+    toc()
+  }
+  names(Pweights) <- c("P.R.MinES.Weights","P.C.MinES.Weights","E.R.MinES.Weights","E.C.MinES.Weights")
+  names(Popt) <- c("P.R.MinES.Optimization","P.C.MinES.Optimization","E.R.MinES.Optimization","E.C.MinES.Optimization")
+  
+  PortfolioWeights[[PortType]][["MinES"]] <- Pweights
+  PortfolioOptimization[[PortType]][["MinES"]] <- Popt
+  
+  rm(opt, weights, CopulaType, NoofRebalPeriod, init.portfolio, AssetsforOptimization, simreturns)
+  toc()
+}
+rm(PortType)
+```
+
+4) Sharpe Portfolio
+
+```{r}
+PortType <- 1
+for (PortType in 1:2){
+  tic(sprintf("PortType %d", PortType))    
+  if(length(PortfolioWeights[[PortType]][["Sharpe"]]) != 0 ){
+      PortfolioWeights[[PortType]][["Sharpe"]] <- list()
+  }
+  if(length(PortfolioOptimization[[PortType]][["Sharpe"]]) != 0 ){
+    PortfolioOptimization[[PortType]][["Sharpe"]] <- list()
+  }
+
+  simreturns <- Sim.Returns[[PortType]]
+  Pweights <- list()
+  Popt <- list()
+  #CopulaType <- 1
+  for (CopulaType in 1:4){
+    tic(sprintf("CopulaType %d", CopulaType))   
+    AssetsforOptimization = simreturns[[CopulaType]]
+    NoofRebalPeriod = length(AssetsforOptimization)
+    weights <-  opt <- list()
+  
+     Sharpeopt <- function(AssetOptim){
+                  init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                  #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                  init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                       min_sum = 0.99, max_sum = 1.01) 
+                  init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                  
+                  
+                  init.portfolio <- add.objective(portfolio=init.portfolio,type="return", name="mean")
+                  init.portfolio <- add.objective(portfolio=init.portfolio,type="risk", name="StdDev")
+                  optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                           optimize_method = "ROI",trace = TRUE, maxSR = TRUE,message = T)
+                  out <- optimized[-2]
+                  return(out)
+                  }
+    numCores <- detectCores() 
+    opt <- pbmcapply::pbmclapply(AssetsforOptimization,Sharpeopt, mc.cores = numCores)
+    weights <- lapply(opt, function(x){x$weights})
+    weights <- Unequal_df(weights)
+    Pweights <- list.append(Pweights, weights)
+    Popt <- list.append(Popt, opt)
+    toc()
+}
+names(Pweights) <- c("P.R.Sharpe.Weights","P.C.Sharpe.Weights","E.R.Sharpe.Weights","E.C.Sharpe.Weights")
+names(Popt) <- c("P.R.Sharpe.Optimization","P.C.Sharpe.Optimization","E.R.Sharpe.Optimization","E.C.Sharpe.Optimization")
+
+
+PortfolioWeights[[PortType]][["Sharpe"]] <- Pweights
+PortfolioOptimization[[PortType]][["Sharpe"]] <- Popt
+
+rm(opt, weights, CopulaType, NoofRebalPeriod, init.portfolio, AssetsforOptimization,simreturns)
+toc()
+}
+rm(PortType)
+```
+
+5) STARR Portfolio
+
+```{r}
+
+for (PortType in 1:2){
+  tic(sprintf("PortType %d", PortType))  
+  if (length(PortfolioWeights[[PortType]][["Starr"]]) != 0 ){PortfolioWeights[[PortType]][["Starr"]] <- list()}
+  if (length(PortfolioOptimization[[PortType]][["Starr"]]) != 0 ){PortfolioOptimization[[PortType]][["Starr"]] <- list()}
+
+  simreturns <- Sim.Returns[[PortType]]
+  Pweights <- list()
+  Popt <- list()  
+  
+  for (CopulaType in 1:4){
+    tic(sprintf("CopulaType %d", CopulaType))  
+    AssetsforOptimization = simreturns[[CopulaType]]
+    NoofRebalPeriod = length(AssetsforOptimization)
+    weights <-  opt <- list()
+    
+    Staropt <- function(AssetOptim){
+                        init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                        #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                        init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                       min_sum = 0.99, max_sum = 1.01) 
+                        init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                        
+                        
+                        init.portfolio <- add.objective(portfolio=init.portfolio, type="risk", name="ES")
+                        init.portfolio <- add.objective(portfolio=init.portfolio, type="return", name="mean")
+                        optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                                 optimize_method = "ROI",trace = TRUE, maxSR = TRUE,message = T)
+                        out <- optimized
+                        return(out)
+                        }
+    numCores <- detectCores() 
+    opt <- pbmcapply::pbmclapply(AssetsforOptimization,Staropt, mc.cores = numCores)
+    weights <- lapply(opt, function(x){x$weights})
+
+
+    weights <- Unequal_df(weights)
+    Pweights <- list.append(Pweights, weights)
+    Popt <- list.append(Popt, opt)
+    
+    toc()
+  }
+  names(Pweights) <- c("P.R.Starr.Weights","P.C.Starr.Weights","E.R.Starr.Weights","E.C.Starr.Weights")
+  names(Popt) <- c("P.R.Starr.Optimization","P.C.Starr.Optimization","E.R.Starr.Optimization","E.C.Starr.Optimization")
+  
+  PortfolioWeights[[PortType]][["Starr"]] <- Pweights
+  PortfolioOptimization[[PortType]][["Starr"]] <- Popt
+  
+  
+  rm(opt, weights, CopulaType, NoofRebalPeriod, AssetsforOptimization, simreturns)
+  toc()
+}
+
+rm(PortType)
+```
+
+6) Maximum Mean Portfolio
+
+```{r}
+
+for (PortType in 1:2){
+
+  if (length(PortfolioWeights[[PortType]][["MaxMean"]]) != 0 )
+    {PortfolioWeights[[PortType]][["MaxMean"]] <- list()}
+  if (length(PortfolioOptimization[[PortType]][["MaxMean"]]) != 0 )
+    {PortfolioOptimization[[PortType]][["MaxMean"]] <- list()}
+  
+  simreturns <- Sim.Returns[[PortType]]
+  Pweights <- list()
+  Popt <- list()  
+  
+  for (CopulaType in 1:4){
+    AssetsforOptimization = simreturns[[CopulaType]]
+    NoofRebalPeriod = length(AssetsforOptimization)
+    weights <-  opt <- list()
+    
+    
+      MaxMeanopt <- function(AssetOptim){
+                            init.portfolio <- portfolio.spec(assets = colnames(AssetOptim))
+                            #init.portfolio <- add.constraint(portfolio = init.portfolio, type = "full_investment") or
+                            init.portfolio <- add.constraint(portfolio = init.portfolio, type = "weight_sum", 
+                                                       min_sum = 0.99, max_sum = 1.01) 
+                            init.portfolio <- add.constraint(portfolio = init.portfolio, type = "long_only") 
+                            
+                            init.portfolio <- add.objective(portfolio=init.portfolio, type="return", name="mean")
+                            optimized <- optimize.portfolio(R = AssetOptim, portfolio = init.portfolio, 
+                                     optimize_method = "ROI",trace = TRUE, maxSR = TRUE,message = T)
+                            out <- optimized[-2]
+                            return(out)
+                            }
+                          
+    numCores <- detectCores() 
+    opt <- pbmcapply::pbmclapply(AssetsforOptimization,MaxMeanopt, mc.cores = numCores)
+    weights <- lapply(opt, function(x){x$weights})
+    weights <- Unequal_df(weights)
+    Pweights <- list.append(Pweights, weights)
+    Popt <- list.append(Popt, opt)
+  
+  }
+  names(Pweights) <- c("P.R.MaxMean.Weights","P.C.MaxMean.Weights","E.R.MaxMean.Weights","E.C.MaxMean.Weights")
+  names(Popt) <- c("P.R.MaxMean.Optimization","P.C.MaxMean.Optimization","E.R.MaxMean.Optimization",
+                   "E.C.MaxMean.Optimization")
+  
+  PortfolioWeights[[PortType]][["MaxMean"]] <- Pweights
+  PortfolioOptimization[[PortType]][["MaxMean"]] <- Popt
+  
+  rm(opt, weights, CopulaType, NoofRebalPeriod, AssetsforOptimization,simreturns,Pweights,Popt)
+
+}
+```
+
+
+Part 5 : Proceed to Backtesting
